@@ -1,0 +1,212 @@
+#!/bin/bash
+
+get_os() {
+	OS_TYPE=`uname -a | grep Darwin`
+	if [ "$OS_TYPE" != "" ]; then
+		eval "$1='mac'"
+	else
+		eval "$1='linux'"
+	fi
+}
+
+get_os SETT_OS_TYPE
+
+check_util() {
+	util_name="$1"
+	# Skip for mac
+	if [ "$util_name" = "wget" ] && [ "$SETT_OS_TYPE" = "mac" ]; then
+		return
+	fi
+	check=`whereis $util_name`
+	if [ "$check" = "" ]; then
+		echo "Error: '$util_name' is not found... Fix error and try again!"
+		exit
+	fi
+}
+
+get_util() {
+	util_name="$1"
+	if [ "$util_name" = "wget" ] && [ "$SETT_OS_TYPE" = "mac" ]; then
+		eval "$2='wget'"
+		return
+	fi
+	if [ "$SETT_OS_TYPE" = "mac" ]; then
+		resp=`whereis $util_name | awk {'print $1'}`
+		eval "$2='$resp'"
+		return
+	else
+		resp=`whereis $util_name | awk {'print $2'}`
+		eval "$2='$resp'"
+		return
+	fi
+	eval "$2=''"
+	return
+}
+
+check_util "dirname"
+check_util "mktemp"
+check_util "ping"
+check_util "grep"
+check_util "awk"
+check_util "curl"
+check_util "sendmail"
+
+get_util "dirname" UTIL_DIRNAME
+get_util "mktemp" UTIL_MKTEMP
+get_util "ping" UTIL_PING
+get_util "grep" UTIL_GREP
+get_util "awk" UTIL_AWK
+get_util "curl" UTIL_CURL
+get_util "sendmail" UTIL_SENDMAIL
+
+SETT_TMP_DIR=$($UTIL_DIRNAME $($UTIL_MKTEMP -u))
+
+SETT_HOSTS_PING_INDEX=0
+SETT_HOSTS_PING_HOST=()
+SETT_HOSTS_PING_EMAIL=()
+
+SETT_HOSTS_HTTP_INDEX=0
+SETT_HOSTS_HTTP_HOST=()
+SETT_HOSTS_HTTP_EMAIL=()
+SETT_HOSTS_HTTP_CODE=()
+
+add_host_ping() {
+	host="$1"
+	email="$2"
+	SETT_HOSTS_PING_HOST[SETT_HOSTS_PING_INDEX]="$host"
+	SETT_HOSTS_PING_EMAIL[SETT_HOSTS_PING_INDEX]="$email"
+	SETT_HOSTS_PING_INDEX=`expr $SETT_HOSTS_PING_INDEX + 1`
+}
+
+add_host_http() {
+	host="$1"
+	email="$2"
+	code="$3"
+	if [[ $code == "" ]]; then
+		code="200"
+	fi
+	SETT_HOSTS_HTTP_HOST[SETT_HOSTS_HTTP_INDEX]="$host"
+	SETT_HOSTS_HTTP_EMAIL[SETT_HOSTS_HTTP_INDEX]="$email"
+	SETT_HOSTS_HTTP_CODE[SETT_HOSTS_HTTP_INDEX]="$code"
+	SETT_HOSTS_HTTP_INDEX=`expr $SETT_HOSTS_HTTP_INDEX + 1`
+}
+
+is_available_ping() {
+	host="$1"
+	available=`$UTIL_PING -w 1 $host | $UTIL_GREP "received" | $UTIL_AWK -F" " '{print $6}'`
+	if [[ $available == "0%" ]]; then
+		available="1"
+	else
+		available="0"
+	fi
+	eval "$2='$available'"
+}
+
+is_available_http() {
+	host="$1"
+	code="$2"
+	resp=$($UTIL_CURL --head --write-out %{http_code} --silent --max-time 5 --output /dev/null $host)
+	if [[ $code == $resp ]]; then
+		eval "$3='1'"
+	else
+		eval "$3='0'"
+	fi
+}
+
+get_state_ping() {
+	host="$1"
+	state=""
+	if [ -f "$SETT_TMP_DIR/$host.ping" ]; then
+		state=`cat $SETT_TMP_DIR/$host.ping`
+	fi
+	eval "$2='$state'"
+}
+
+get_state_http() {
+	host="$1"
+	state=""
+	if [ -f "$SETT_TMP_DIR/$host.http" ]; then
+		state=`cat $SETT_TMP_DIR/$host.http`
+	fi
+	eval "$2='$state'"
+}
+
+set_state_ping() {
+	host="$1"
+	state="$2"
+	echo "$state" > "$SETT_TMP_DIR/$host.ping"
+}
+
+set_state_http() {
+	host="$1"
+	state="$2"
+	echo "$state" > "$SETT_TMP_DIR/$host.http"
+}
+
+send_notify() {
+	subject="$1"
+	message="$2"
+	email="$3"
+	(echo "Subject: $subject"; echo ""; echo "$message";) | $UTIL_SENDMAIL $email
+}
+
+send_notify_up() {
+	host="$1"
+	email="$2"
+	type="$3"
+	time=`date +%Y.%m.%d/%H:%M:%S`
+	send_notify "🔵 [UP] $host ($type)" "Host $host ($type) is up ($time)" $email
+}
+
+send_notify_down() {
+	host="$1"
+	email="$2"
+	type="$3"
+	time=`date +%Y.%m.%d/%H:%M:%S`
+	send_notify "🔴 [DOWN] $host ($type)" "Host $host ($type) is down ($time)" $email
+}
+
+check_and_notify() {
+	# PING
+	for index in ${!SETT_HOSTS_PING_HOST[*]}
+	do
+		host=${SETT_HOSTS_PING_HOST[$index]}
+		email=${SETT_HOSTS_PING_EMAIL[$index]}
+		get_state_ping $host state_was
+		is_available_ping $host state_now
+		if [[ $state_was != $state_now ]]; then
+			set_state_ping $host $state_now
+			if [[ $state_now == "1" ]]; then
+				send_notify_up $host $email "PING"
+			else
+				send_notify_down $host $email "PING"
+			fi
+		fi
+	done
+
+	# HTTP
+	for index in ${!SETT_HOSTS_HTTP_HOST[*]}
+	do
+		host=${SETT_HOSTS_HTTP_HOST[$index]}
+		email=${SETT_HOSTS_HTTP_EMAIL[$index]}
+		code=${SETT_HOSTS_HTTP_CODE[$index]}
+		get_state_http $host state_was
+		is_available_http $host $code state_now
+		if [[ $state_was != $state_now ]]; then
+			set_state_http $host $state_now
+			if [[ $state_now == "1" ]]; then
+				send_notify_up $host $email "HTTP"
+			else
+				send_notify_down $host $email "HTTP"
+			fi
+		fi
+	done
+}
+
+# Add host name or IP with email here:
+
+# add_host_ping "google.com" "my@email.com"
+# add_host_ping "facebook.com" "my@email.com"
+# add_host_http "google.com" "my@email.com" "200"
+
+check_and_notify
