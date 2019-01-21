@@ -1,7 +1,5 @@
 # bash-pingdom-analog
-Let your server monitor other your servers like pingdom
-
-If you have two or more server in different regions, you can simple setup this cron script to monitor any servers or sites and send notifications to your email. Why? Simple, it's free.
+Let your server monitor other your servers like pingdom. If you have two or more server in different regions, you can simple setup this cron script to monitor any servers or sites and send notifications to your email. Why? Simple, it's free.
 
 ## Install sendmail
 **Skip this step if you already have worked sendmail on server**
