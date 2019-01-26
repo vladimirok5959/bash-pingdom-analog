@@ -93,7 +93,7 @@ add_host_http() {
 
 is_available_ping() {
 	host="$1"
-	available=`$UTIL_PING -w 1 $host | $UTIL_GREP "received" | $UTIL_AWK -F" " '{print $6}'`
+	available=`$UTIL_PING -w 5 $host | $UTIL_GREP "received" | $UTIL_AWK -F" " '{print $6}'`
 	if [[ $available == "0%" ]]; then
 		available="1"
 	else
@@ -173,7 +173,18 @@ check_and_notify() {
 		host=${SETT_HOSTS_PING_HOST[$index]}
 		email=${SETT_HOSTS_PING_EMAIL[$index]}
 		get_state_ping $host state_was
+
+		# Check three times if not available
 		is_available_ping $host state_now
+		if [[ $state_was != $state_now ]] && [[ $state_now == "0" ]]; then
+			sleep 1
+			is_available_ping $host state_now
+			if [[ $state_was != $state_now ]] && [[ $state_now == "0" ]]; then
+				sleep 1
+				is_available_ping $host state_now
+			fi
+		fi
+
 		if [[ $state_was != $state_now ]]; then
 			set_state_ping $host $state_now
 			if [[ $state_now == "1" ]]; then
@@ -191,7 +202,18 @@ check_and_notify() {
 		email=${SETT_HOSTS_HTTP_EMAIL[$index]}
 		code=${SETT_HOSTS_HTTP_CODE[$index]}
 		get_state_http $host state_was
+
+		# Check three times if not available
 		is_available_http $host $code state_now
+		if [[ $state_was != $state_now ]] && [[ $state_now == "0" ]]; then
+			sleep 1
+			is_available_http $host $code state_now
+			if [[ $state_was != $state_now ]] && [[ $state_now == "0" ]]; then
+				sleep 1
+				is_available_http $host $code state_now
+			fi
+		fi
+
 		if [[ $state_was != $state_now ]]; then
 			set_state_http $host $state_now
 			if [[ $state_now == "1" ]]; then
